@@ -7,3 +7,7 @@ export const authClient = createAuthClient({
 });
 
 export const { signIn, signUp, signOut, useSession, updateUser } = authClient;
+
+//98247167181-922n2ioiki92okmplih01eq35o3ph4mc.apps.googleusercontent.com
+
+//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

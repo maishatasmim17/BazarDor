@@ -18,102 +18,64 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const LOCAL_STORAGE_KEY = 'bazardor_user_session';
-const LOCAL_USERS_KEY = 'bazardor_registered_users';
+const DEFAULT_AVATAR =
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces';
+
+const toUser = (u: {
+  id: string;
+  name?: string | null;
+  email: string;
+  image?: string | null;
+}): User => ({
+  id: u.id,
+  name: u.name || 'ইউজার',
+  email: u.email,
+  image: u.image || DEFAULT_AVATAR,
+});
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  useEffect(() => {
-    // Check if session exists in storage
-    try {
-      const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (stored) {
-        setUser(JSON.parse(stored));
-      }
-    } catch {
-      // ignore
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
+  // user state + route-guard cookie (user ke sync kore rakhe)
   const saveUserSession = (u: User | null) => {
     setUser(u);
-    if (u) {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(u));
-      if (typeof document !== 'undefined') {
-        document.cookie = `bazardor_session=true; path=/; max-age=604800; SameSite=Lax`;
-      }
-    } else {
-      localStorage.removeItem(LOCAL_STORAGE_KEY);
-      if (typeof document !== 'undefined') {
-        document.cookie = `bazardor_session=; path=/; max-age=0; SameSite=Lax`;
-      }
+    if (typeof document !== 'undefined') {
+      document.cookie = u
+        ? `bazardor_session=true; path=/; max-age=604800; SameSite=Lax`
+        : `bazardor_session=; path=/; max-age=0; SameSite=Lax`;
     }
   };
 
+  useEffect(() => {
+    // ager fake Rezwan data browser theke muche felo
+    try {
+      localStorage.removeItem('bazardor_user_session');
+      localStorage.removeItem('bazardor_registered_users');
+    } catch {
+      // ignore
+    }
+
+    // real session BetterAuth (MongoDB) theke nao
+    authClient
+      .getSession()
+      .then(({ data }) => saveUserSession(data?.user ? toUser(data.user) : null))
+      .catch(() => saveUserSession(null))
+      .finally(() => setIsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const login = async (email: string, pass: string): Promise<boolean> => {
     try {
-      // 1. Try BetterAuth client login
-      try {
-        const res = await authClient.signIn.email({
-          email,
-          password: pass,
-        });
-        if (res?.data?.user) {
-          const u: User = {
-            id: res.data.user.id,
-            name: res.data.user.name || 'ইউজার',
-            email: res.data.user.email,
-            image: res.data.user.image || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
-          };
-          saveUserSession(u);
-          toast.success('সফলভাবে সাইন ইন হয়েছে!');
-          return true;
-        }
-      } catch {
-        // Fallback to local credential check
+      const { data, error } = await authClient.signIn.email({ email, password: pass });
+      if (error || !data?.user) {
+        toast.error('ভুল ইমেইল বা পাসওয়ার্ড প্রদান করা হয়েছে!');
+        return false;
       }
-
-      // 2. Check registered users from localStorage
-      const rawUsers = localStorage.getItem(LOCAL_USERS_KEY);
-      const users: Array<{ name: string; email: string; pass: string; id: string }> = rawUsers ? JSON.parse(rawUsers) : [];
-      const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-
-      if (found && found.pass === pass) {
-        const sessionUser: User = {
-          id: found.id,
-          name: found.name,
-          email: found.email,
-          image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
-        };
-        saveUserSession(sessionUser);
-        toast.success('সফলভাবে সাইন ইন হয়েছে!');
-        return true;
-      }
-
-      // 3. Demo account for evaluation matching Figma Screenshot 3 (Rezwan Ahmed)
-      if (
-        email.toLowerCase() === 'rezwanahmed@gmail.com' ||
-        email.toLowerCase() === 'rezwan@gmail.com' ||
-        email.toLowerCase() === 'user@example.com'
-      ) {
-        const sessionUser: User = {
-          id: 'demo-rezwan-1',
-          name: 'Rezwan Ahmed',
-          email: 'rezwanahmed@gmail.com',
-          image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
-        };
-        saveUserSession(sessionUser);
-        toast.success('সফলভাবে সাইন ইন হয়েছে!');
-        return true;
-      }
-
-      toast.error('ভুল ইমেইল বা পাসওয়ার্ড প্রদান করা হয়েছে!');
-      return false;
+      saveUserSession(toUser(data.user));
+      toast.success('সফলভাবে সাইন ইন হয়েছে!');
+      return true;
     } catch {
       toast.error('সাইন ইন ব্যর্থ হয়েছে, আবার চেষ্টা করুন।');
       return false;
@@ -122,35 +84,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (name: string, email: string, pass: string): Promise<boolean> => {
     try {
-      // 1. Try BetterAuth client signup
-      try {
-        await authClient.signUp.email({
-          name,
-          email,
-          password: pass,
-        });
-      } catch {
-        // Fallback
-      }
-
-      const rawUsers = localStorage.getItem(LOCAL_USERS_KEY);
-      const users = rawUsers ? JSON.parse(rawUsers) : [];
-      const exists = users.some((u: { email: string }) => u.email.toLowerCase() === email.toLowerCase());
-      if (exists) {
-        toast.error('এই ইমেইল দিয়ে ইতিমধ্যে অ্যাকাউন্ট আছে!');
-        return false;
-      }
-
-      const newUser = {
-        id: `user-${Date.now()}`,
+      const { data, error } = await authClient.signUp.email({
         name,
         email,
-        pass,
-      };
-      users.push(newUser);
-      localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
-
-      toast.success('অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে! অনুগ্রহ করে সাইন ইন করুন।');
+        password: pass,
+      });
+      if (error) {
+        toast.error(error.message || 'নিবন্ধন ব্যর্থ হয়েছে!');
+        return false;
+      }
+      if (data?.user) saveUserSession(toUser(data.user));
+      toast.success('অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে!');
       return true;
     } catch {
       toast.error('নিবন্ধন ব্যর্থ হয়েছে!');
@@ -160,16 +104,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const socialLogin = async (provider: 'google' | 'github', redirectUrl?: string) => {
     try {
-      // Social login demo profile matching Figma Screenshot 3 (Rezwan Ahmed)
-      const demoUser: User = {
-        id: `social-${provider}-1`,
-        name: 'Rezwan Ahmed',
-        email: 'rezwanahmed@gmail.com',
-        image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
-      };
-      saveUserSession(demoUser);
-      toast.success(`${provider === 'google' ? 'Google' : 'GitHub'} দিয়ে সফলভাবে সাইন ইন হয়েছে!`);
-      router.push(redirectUrl || '/');
+      // real Google/GitHub e redirect hobe, fire ele session auto load hobe
+      const { error } = await authClient.signIn.social({
+        provider,
+        callbackURL: redirectUrl || '/',
+      });
+      if (error) toast.error('সোশ্যাল লগইন ব্যর্থ হয়েছে!');
     } catch {
       toast.error('সোশ্যাল লগইন ব্যর্থ হয়েছে!');
     }
@@ -177,7 +117,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await authClient.signOut().catch(() => {});
+      await authClient.signOut();
+    } catch {
+      // ignore
     } finally {
       saveUserSession(null);
       toast.success('সফলভাবে সাইন আউট হয়েছে');
@@ -188,29 +130,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateProfileName = async (newName: string): Promise<boolean> => {
     if (!user) return false;
     try {
-      // BetterAuth updateUser method per https://better-auth.com/docs/concepts/users-accounts#update-user
-      try {
-        await authClient.updateUser({
-          name: newName,
-        });
-      } catch {
-        // fallback
+      const { error } = await authClient.updateUser({ name: newName });
+      if (error) {
+        toast.error('তথ্য আপডেট ব্যর্থ হয়েছে!');
+        return false;
       }
-
-      const updated = { ...user, name: newName };
-      saveUserSession(updated);
-
-      // Also update local registered users
-      const rawUsers = localStorage.getItem(LOCAL_USERS_KEY);
-      if (rawUsers) {
-        const users = JSON.parse(rawUsers);
-        const idx = users.findIndex((u: { email: string }) => u.email === user.email);
-        if (idx !== -1) {
-          users[idx].name = newName;
-          localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
-        }
-      }
-
+      saveUserSession({ ...user, name: newName });
       toast.success('প্রোফাইলের তথ্য সফলভাবে আপডেট করা হয়েছে!');
       return true;
     } catch {
@@ -221,15 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{
-        user,
-        isLoading,
-        login,
-        register,
-        socialLogin,
-        logout,
-        updateProfileName,
-      }}
+      value={{ user, isLoading, login, register, socialLogin, logout, updateProfileName }}
     >
       {children}
     </AuthContext.Provider>
