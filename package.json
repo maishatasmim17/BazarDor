@@ -19,7 +19,6 @@
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
